@@ -1,0 +1,45 @@
+/* Gilded Heist — page chrome around the canvas. One job: centre the game. */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: #070b14;
+}
+
+body {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+}
+
+.stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+}
+
+#game {
+  display: block;
+  width: min(1280px, 96vw);
+  height: auto;
+  border: 2px solid #8a6d2f;
+  border-radius: 8px;
+  background: #0d1526;
+  box-shadow: 0 0 48px rgba(232, 182, 76, 0.12);
+}
+
+.hint {
+  margin: 0;
+  color: #7c8aa8;
+  font-size: 14px;
+  text-align: center;
+}
