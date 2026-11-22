@@ -1,216 +1,198 @@
-// Gilded Heist — entities: guards, cameras, line of sight, movement and alarm.
-// One job: how the world reacts — patrols, suspicion, chases, camera sweeps,
-// who can see the thief, and how the alarm meter rises and falls.
+// VELVET SHADOW — entities: guards, cameras, loot, particles, line of sight.
+import { TILE, LOOT_DEFS } from './levels.js';
 
-import { PLAY } from './levels.js';
-
-export const GUARD_RANGE = 210;
-export const GUARD_FOV = (75 * Math.PI) / 180;
-export const CAMERA_RANGE = 240;
-export const CAMERA_FOV = (55 * Math.PI) / 180;
-export const CATCH_RADIUS = 26;
-export const PLAYER_RADIUS = 14;
-
-const TAU = Math.PI * 2;
-
-export function angleDiff(a, b) {
-  let d = (a - b) % TAU;
-  if (d > Math.PI) d -= TAU;
-  if (d < -Math.PI) d += TAU;
+export function dist(ax, ay, bx, by) { return Math.hypot(bx - ax, by - ay); }
+export function angDiff(a, b) {
+  let d = a - b;
+  while (d > Math.PI) d -= Math.PI * 2;
+  while (d < -Math.PI) d += Math.PI * 2;
   return d;
 }
 
-export function clamp(v, lo, hi) {
-  return v < lo ? lo : v > hi ? hi : v;
-}
-
-export function pointInRect(x, y, r) {
-  return x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
-}
-
-export function circleHitsWall(x, y, radius, walls) {
-  for (const w of walls) {
-    const nx = clamp(x, w.x, w.x + w.w);
-    const ny = clamp(y, w.y, w.y + w.h);
-    const dx = x - nx;
-    const dy = y - ny;
-    if (dx * dx + dy * dy < radius * radius) return true;
-  }
-  return false;
-}
-
-// Move a circle against the walls, axis by axis, and clamp it inside the playfield.
-export function moveCircle(body, dx, dy, walls) {
-  const nx = clamp(body.x + dx, PLAY.x + body.r, PLAY.x + PLAY.w - body.r);
-  if (!circleHitsWall(nx, body.y, body.r, walls)) body.x = nx;
-  const ny = clamp(body.y + dy, PLAY.y + body.r, PLAY.y + PLAY.h - body.r);
-  if (!circleHitsWall(body.x, ny, body.r, walls)) body.y = ny;
-}
-
-// True when the segment (x1,y1)-(x2,y2) is not cut by any wall.
-export function hasLineOfSight(x1, y1, x2, y2, walls) {
-  const dx = x2 - x1;
-  const dy = y2 - y1;
-  const dist = Math.hypot(dx, dy);
-  const steps = Math.max(1, Math.ceil(dist / 8));
+// Grid raycast: true when the segment is blocked by a wall/table/plant tile.
+export function losBlocked(grid, ax, ay, bx, by) {
+  const d = dist(ax, ay, bx, by);
+  const steps = Math.max(1, Math.ceil(d / 6));
   for (let i = 1; i < steps; i++) {
     const t = i / steps;
-    const px = x1 + dx * t;
-    const py = y1 + dy * t;
-    for (const w of walls) {
-      if (pointInRect(px, py, w)) return false;
-    }
+    const x = ax + (bx - ax) * t;
+    const y = ay + (by - ay) * t;
+    const tx = Math.floor(x / TILE);
+    const ty = Math.floor(y / TILE);
+    if (ty < 0 || ty >= grid.length || tx < 0 || tx >= grid[0].length) return true;
+    const c = grid[ty][tx];
+    if (c === '#' || c === 'T' || c === 'A') return true;
   }
-  return true;
-}
-
-export function inShadow(x, y, shadows) {
-  for (const s of shadows) if (pointInRect(x, y, s)) return true;
   return false;
 }
 
-// Build live guard objects from a level definition.
-export function makeGuards(defs) {
-  return defs.map((d) => ({
-    name: d.name,
-    x: d.waypoints[0].x,
-    y: d.waypoints[0].y,
-    r: 15,
-    waypoints: d.waypoints,
-    wpIndex: 1,
-    facing: 0,
-    state: 'patrol', // patrol | suspicious | alert
-    awareness: 0,
-    lastSeen: null,
-    loseSightTimer: 0,
-    investigateTimer: 0,
-  }));
+// Is the player inside a vision cone (range, half-angle, facing) with clear LOS?
+export function inCone(grid, ox, oy, facing, range, halfAngle, px, py) {
+  const d = dist(ox, oy, px, py);
+  if (d > range) return 0;
+  const a = Math.atan2(py - oy, px - ox);
+  const diff = Math.abs(angDiff(a, facing));
+  if (diff > halfAngle) return 0;
+  if (losBlocked(grid, ox, oy, px, py)) return 0;
+  // Visibility fades with distance and angle.
+  return Math.max(0, 1 - d / range) * (1 - diff / halfAngle * 0.5);
 }
 
-export function makeCameras(defs) {
-  return defs.map((d) => ({
-    x: d.x,
-    y: d.y,
-    baseAngle: d.baseAngle,
-    sweep: d.sweep,
-    speed: d.speed,
-    phase: Math.random() * TAU,
-    disabled: false,
-  }));
-}
-
-export function cameraAngle(cam, time) {
-  return cam.baseAngle + Math.sin(time * cam.speed + cam.phase) * cam.sweep;
-}
-
-// Does this viewer see the player? Returns 0 when not seen, else a 0..1 strength
-// (1 when the thief is close and fully exposed).
-export function seesPlayer(viewer, range, fov, player, walls, sneaking) {
-  const dx = player.x - viewer.x;
-  const dy = player.y - viewer.y;
-  const dist = Math.hypot(dx, dy);
-  let effRange = range;
-  if (sneaking) effRange *= 0.7;
-  if (player.inShadow) effRange *= 0.6;
-  if (dist > effRange) return 0;
-  const ang = Math.atan2(dy, dx);
-  if (Math.abs(angleDiff(ang, viewer.facing)) > fov / 2) return 0;
-  if (!hasLineOfSight(viewer.x, viewer.y, player.x, player.y, walls)) return 0;
-  let strength = 1.15 - dist / effRange;
-  if (sneaking) strength *= 0.6;
-  if (player.inShadow) strength *= 0.55;
-  return clamp(strength, 0.15, 1);
-}
-
-function guardSpeed(guard) {
-  if (guard.state === 'alert') return 112;
-  if (guard.state === 'suspicious') return 86;
-  return 56;
-}
-
-function stepToward(guard, tx, ty, dt, walls) {
-  const dx = tx - guard.x;
-  const dy = ty - guard.y;
-  const dist = Math.hypot(dx, dy);
-  if (dist < 2) return true;
-  const sp = guardSpeed(guard);
-  const step = Math.min(dist, sp * dt);
-  const nx = guard.x + (dx / dist) * step;
-  const ny = guard.y + (dy / dist) * step;
-  guard.facing = Math.atan2(dy, dx);
-  moveCircle(guard, nx - guard.x, ny - guard.y, walls);
-  return dist <= step + 1;
-}
-
-// One guard tick. Returns 'caught' when the guard grabs the thief.
-export function updateGuard(guard, player, walls, dt, onSpotted) {
-  const seen = seesPlayer(guard, GUARD_RANGE, GUARD_FOV, player, walls, player.sneaking);
-  if (seen > 0) {
-    guard.awareness = clamp(guard.awareness + seen * 1.25 * dt, 0, 1);
-    guard.lastSeen = { x: player.x, y: player.y };
-    guard.loseSightTimer = 0;
-    if (onSpotted) onSpotted(guard, seen);
-  } else {
-    guard.awareness = clamp(guard.awareness - 0.45 * dt, 0, 1);
-    guard.loseSightTimer += dt;
+export class Particle {
+  constructor(x, y, vx, vy, life, color, size) {
+    this.x = x; this.y = y; this.vx = vx; this.vy = vy;
+    this.life = life; this.maxLife = life; this.color = color; this.size = size;
   }
-
-  if (guard.awareness >= 0.85) guard.state = 'alert';
-  else if (guard.awareness >= 0.5) guard.state = 'suspicious';
-  else if (guard.state !== 'patrol' && guard.loseSightTimer > 4) {
-    guard.state = 'patrol';
-    guard.lastSeen = null;
+  update(dt) {
+    this.x += this.vx * dt; this.y += this.vy * dt;
+    this.vy += 60 * dt; this.life -= dt;
   }
+  get dead() { return this.life <= 0; }
+}
 
-  if (guard.state === 'alert') {
-    const target = guard.lastSeen || { x: player.x, y: player.y };
-    stepToward(guard, target.x, target.y, dt, walls);
-    if (guard.loseSightTimer > 2.5 && guard.lastSeen) {
-      guard.state = 'suspicious';
-      guard.investigateTimer = 3;
+export function burst(particles, x, y, color, n = 14, speed = 120) {
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const s = speed * (0.4 + Math.random() * 0.8);
+    particles.push(new Particle(x, y, Math.cos(a) * s, Math.sin(a) * s - 40,
+      0.5 + Math.random() * 0.5, color, 2 + Math.random() * 3));
+  }
+}
+
+export class Guard {
+  constructor(def, grid) {
+    this.wp = def.wp.map(([tx, ty]) => ({ x: (tx + 0.5) * TILE, y: (ty + 0.5) * TILE }));
+    this.x = this.wp[0].x; this.y = this.wp[0].y;
+    this.speed = def.speed * TILE * 0.55;
+    this.wpi = 1;
+    this.facing = 0;
+    this.state = 'calm'; // calm | suspicious | alarmed
+    this.alert = 0; // 0..1
+    this.lastSeen = null;
+    this.suspicion = null; // {x, y} point to investigate
+    this.pauseT = 0;
+    this.stepT = 0;
+    this.lastX = this.x; this.lastY = this.y; this.stuckT = 0;
+  }
+  update(dt, player, grid, hearing) {
+    const vis = player.hidden ? 0 : inCone(grid, this.x, this.y, this.facing,
+      player.sneak ? 130 : 210, 0.62, player.x, player.y);
+    if (vis > 0.12) {
+      this.alert = Math.min(1, this.alert + dt * (0.35 + vis * 1.5));
+      this.lastSeen = { x: player.x, y: player.y };
+    } else {
+      this.alert = Math.max(0, this.alert - dt * 0.25);
     }
-  } else if (guard.state === 'suspicious') {
-    if (guard.lastSeen) {
-      const arrived = stepToward(guard, guard.lastSeen.x, guard.lastSeen.y, dt, walls);
-      if (arrived) {
-        guard.investigateTimer -= dt;
-        guard.facing += dt * 1.5;
-        if (guard.investigateTimer <= 0) {
-          guard.state = 'patrol';
-          guard.lastSeen = null;
-        }
-      } else {
-        guard.investigateTimer = 3;
+    // Hearing: a loud noise nearby draws the guard.
+    if (hearing && dist(this.x, this.y, hearing.x, hearing.y) < hearing.r) {
+      if (this.state !== 'alarmed') {
+        this.alert = Math.max(this.alert, 0.45);
+        this.suspicion = { x: hearing.x, y: hearing.y };
       }
     }
-  } else {
-    const wp = guard.waypoints[guard.wpIndex];
-    const arrived = stepToward(guard, wp.x, wp.y, dt, walls);
-    if (arrived) guard.wpIndex = (guard.wpIndex + 1) % guard.waypoints.length;
-  }
+    const prev = this.state;
+    this.state = this.alert > 0.72 ? 'alarmed' : this.alert > 0.32 ? 'suspicious' : 'calm';
+    if (this.state === 'alarmed' && prev !== 'alarmed') this.suspicion = null;
 
-  const d = Math.hypot(player.x - guard.x, player.y - guard.y);
-  if (d < CATCH_RADIUS) return 'caught';
-  return null;
-}
-
-// One camera tick. Returns the alarm rise rate while the thief is in its cone.
-export function updateCamera(cam, player, walls, time) {
-  if (cam.disabled) return 0;
-  const viewer = { x: cam.x, y: cam.y, facing: cameraAngle(cam, time) };
-  const seen = seesPlayer(viewer, CAMERA_RANGE, CAMERA_FOV, player, walls, player.sneaking);
-  return seen > 0 ? 18 * (0.5 + seen) : 0;
-}
-
-// A dash is loud: guards nearby turn suspicious and come looking.
-export function noiseAlert(guards, x, y, radius) {
-  for (const g of guards) {
-    const d = Math.hypot(g.x - x, g.y - y);
-    if (d < radius && g.state === 'patrol') {
-      g.state = 'suspicious';
-      g.awareness = Math.max(g.awareness, 0.6);
-      g.lastSeen = { x, y };
-      g.investigateTimer = 3;
+    let target = null;
+    let spd = this.speed;
+    if (this.state === 'alarmed' && this.lastSeen) {
+      target = this.lastSeen; spd = this.speed * 1.85;
+    } else if (this.state === 'suspicious' && this.suspicion) {
+      target = this.suspicion; spd = this.speed * 1.25;
+    } else if (this.state === 'suspicious' && this.lastSeen) {
+      target = this.lastSeen; spd = this.speed * 1.25;
     }
+    if (target) {
+      this.moveToward(target.x, target.y, spd, dt, grid);
+      if (dist(this.x, this.y, target.x, target.y) < 14) {
+        if (this.state === 'suspicious') { this.suspicion = null; this.alert = Math.max(0.2, this.alert - 0.2); }
+        this.lastSeen = null;
+      }
+    } else {
+      if (this.pauseT > 0) {
+        this.pauseT -= dt;
+        this.facing += dt * 0.9; // look around at waypoint
+      } else {
+        const w = this.wp[this.wpi];
+        this.moveToward(w.x, w.y, spd, dt, grid);
+        if (dist(this.x, this.y, w.x, w.y) < 10) {
+          this.wpi = (this.wpi + 1) % this.wp.length;
+          this.pauseT = 0.9;
+        }
+      }
+    }
+    this.stepT += dt;
+    // Stuck fallback: a waypoint blocked by furniture must not pin the guard.
+    if (dist(this.x, this.y, this.lastX, this.lastY) < 1.5) {
+      this.stuckT += dt;
+      if (this.stuckT > 1.5) {
+        this.stuckT = 0;
+        this.wpi = (this.wpi + 1) % this.wp.length;
+        this.suspicion = null;
+        this.lastSeen = null;
+        this.alert = Math.max(0.2, this.alert - 0.3);
+      }
+    } else {
+      this.stuckT = 0;
+    }
+    this.lastX = this.x; this.lastY = this.y;
+  }
+  moveToward(tx, ty, spd, dt, grid) {
+    const dx = tx - this.x;
+    const dy = ty - this.y;
+    const d = Math.hypot(dx, dy);
+    if (d < 1) return;
+    const nx = this.x + (dx / d) * spd * dt;
+    const ny = this.y + (dy / d) * spd * dt;
+    this.facing = Math.atan2(dy, dx);
+    if (!this.hitsWall(grid, nx, this.y)) this.x = nx;
+    if (!this.hitsWall(grid, this.x, ny)) this.y = ny;
+  }
+  hitsWall(grid, x, y) {
+    const r = 12;
+    for (const [cx, cy] of [[x - r, y - r], [x + r, y - r], [x - r, y + r], [x + r, y + r]]) {
+      const tx = Math.floor(cx / TILE);
+      const ty = Math.floor(cy / TILE);
+      if (ty < 0 || ty >= grid.length || tx < 0 || tx >= grid[0].length) return true;
+      const c = grid[ty][tx];
+      if (c === '#' || c === 'T' || c === 'A') return true;
+    }
+    return false;
+  }
+}
+
+export class Camera {
+  constructor(def) {
+    this.x = (def.tx + 0.5) * TILE;
+    this.y = (def.ty + 0.5) * TILE;
+    this.base = (def.angle * Math.PI) / 180;
+    this.arc = (def.arc * Math.PI) / 180;
+    this.speed = def.speed;
+    this.t = Math.random() * 10;
+    this.disabled = false;
+    this.hack = 0; // 0..1
+    this.sees = 0;
+  }
+  get facing() {
+    return this.base + Math.sin(this.t * this.speed) * this.arc / 2;
+  }
+  update(dt, player, grid) {
+    this.t += dt;
+    if (this.disabled) { this.sees = 0; return 0; }
+    const vis = player.hidden ? 0 : inCone(grid, this.x, this.y, this.facing, 230, 0.5, player.x, player.y);
+    this.sees = vis;
+    return vis;
+  }
+}
+
+export class Loot {
+  constructor(tx, ty, kind) {
+    this.x = (tx + 0.5) * TILE;
+    this.y = (ty + 0.5) * TILE;
+    this.kind = kind;
+    this.def = LOOT_DEFS[kind];
+    this.taken = false;
+    this.bob = Math.random() * 6;
   }
 }

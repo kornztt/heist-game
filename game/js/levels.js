@@ -1,172 +1,193 @@
-// Gilded Heist — level definitions.
-// One job: describe the three rooms (walls, guards, cameras, loot, exit, shadows).
-// Coordinates are in canvas pixels. The playfield is x 24..1256, y 96..668.
-
-export const PLAY = { x: 24, y: 96, w: 1232, h: 572 };
+// VELVET SHADOW — level definitions.
+// Maps are 32x18 grids, tile 40px. Legend:
+//   # wall   . floor   , shadow floor (hiding)   r rug floor
+//   P player start   E exit   C closet (hide)   T table   A plant
+//   p painting loot  g gold loot  j gem loot  d document loot
+//   X laser emitter  o lamp (light)   + door gap (floor)
+export const TILE = 40;
+export const COLS = 32;
+export const ROWS = 18;
 
 export const LEVELS = [
   {
+    id: 1,
     name: 'The Gilded Gallery',
-    intro: 'A quiet museum after dark. Lift every exhibit, then slip out the top door.',
-    playerStart: { x: 80, y: 140 },
-    exit: { x: 1200, y: 130 },
-    walls: [
-      { x: 430, y: 130, w: 16, h: 250 },
-      { x: 430, y: 470, w: 16, h: 160 },
-      { x: 700, y: 300, w: 200, h: 16 },
-      { x: 640, y: 180, w: 150, h: 90 },
-      { x: 950, y: 480, w: 140, h: 80 },
-    ],
-    shadows: [
-      { x: 60, y: 300, w: 180, h: 120 },
-      { x: 900, y: 560, w: 200, h: 80 },
+    sub: 'Lift the four paintings — mind the patrols',
+    palette: {
+      floor: '#253c49', floor2: '#223240', wall: '#0e1a22', wallTop: '#2c4a5a',
+      rug: '#5a2e35', rugEdge: '#c9a24b', accent: '#c9a24b', shadow: '#101d26',
+      glow: 'rgba(201,162,75,0.55)',
+    },
+    map: [
+      '################################',
+      '#......#........#.......p......#',
+      '#..p...#...TT...#...A...#..K...#',
+      '#......#........#.......#......#',
+      '#..TT..+........+...TT..#......#',
+      '#......#........#.......#......#',
+      '####.####..##...###.####.#.#####',
+      '#.....,,,,,,,,,,,,,,,,,,,......#',
+      '#.p...TT.......P......TT....p..#',
+      '#.....,,,,,,,,,,,,,,,,,,,......#',
+      '####.####..##...###.####.#.#####',
+      '#......#........#.......#......#',
+      '#..A...#...p....#..TT...#..E...#',
+      '#......#........#.......#......#',
+      '#..TT..+...TT...+...A...+......#',
+      '#......#........#.......#......#',
+      '#......#........#.......#......#',
+      '################################',
     ],
     guards: [
-      {
-        name: 'Night Watchman',
-        waypoints: [
-          { x: 120, y: 160 },
-          { x: 340, y: 160 },
-          { x: 340, y: 600 },
-          { x: 120, y: 600 },
-        ],
-      },
-      {
-        name: 'Gallery Guard',
-        waypoints: [
-          { x: 600, y: 160 },
-          { x: 1120, y: 160 },
-          { x: 1120, y: 600 },
-          { x: 600, y: 600 },
-        ],
-      },
+      { wp: [[9, 8], [19, 8]], speed: 1.6 },
+      { wp: [[11, 12], [14, 12], [14, 15], [11, 15]], speed: 1.7 },
     ],
     cameras: [
-      { x: 500, y: 110, baseAngle: Math.PI / 2, sweep: 0.6, speed: 0.7 },
-      { x: 1240, y: 300, baseAngle: Math.PI, sweep: 0.5, speed: 0.9 },
+      { tx: 28, ty: 2, angle: 180, arc: 70, speed: 0.55 },
+      { tx: 3, ty: 13, angle: 0, arc: 60, speed: 0.45 },
     ],
-    loot: [
-      { x: 500, y: 150, kind: 'painting', label: 'Sunset Canvas' },
-      { x: 715, y: 290, kind: 'gem', label: 'Star Sapphire' },
-      { x: 150, y: 600, kind: 'vase', label: 'Porcelain Vase' },
-      { x: 1150, y: 620, kind: 'statue', label: 'Bronze Falcon' },
-    ],
+    lasers: [],
   },
   {
+    id: 2,
     name: 'The Vault Wing',
-    intro: 'The bank vault wing. Three guards, three cameras, five prizes. Stay in the dark.',
-    playerStart: { x: 80, y: 140 },
-    exit: { x: 1200, y: 130 },
-    walls: [
-      { x: 640, y: 130, w: 16, h: 220 },
-      { x: 640, y: 440, w: 16, h: 190 },
-      { x: 900, y: 200, w: 220, h: 16 },
-      { x: 300, y: 480, w: 220, h: 16 },
-      { x: 900, y: 420, w: 160, h: 90 },
-      { x: 250, y: 220, w: 120, h: 80 },
-    ],
-    shadows: [
-      { x: 80, y: 400, w: 180, h: 110 },
-      { x: 1000, y: 120, w: 180, h: 90 },
+    sub: 'Gold behind the lasers — time the beams',
+    palette: {
+      floor: '#2b3346', floor2: '#272f40', wall: '#0d1119', wallTop: '#3a4a66',
+      rug: '#2e3d55', rugEdge: '#d8b45a', accent: '#d8b45a', shadow: '#141a26',
+      glow: 'rgba(216,180,90,0.55)',
+    },
+    map: [
+      '################################',
+      '#..g...#....X......X....#...g...#',
+      '#......#................#.......#',
+      '#..TT..#..rrrrrrrrrr..T.#...TT..#',
+      '#......#..rrrrrrrrrr....#.......#',
+      '#......#..rrrrrrrrrr..T.#...K...#',
+      '####+######....X....#######+#####',
+      '#,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,#',
+      '#..A.....TT......P.......TT..A..#',
+      '#,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,#',
+      '####+######....X....#######+#####',
+      '#......#................#.......#',
+      '#..g...#..TT......TT....#...g...#',
+      '#......#................#...E...#',
+      '#..TT..+......TT........+.......#',
+      '#......#................#.......#',
+      '#..o...#.....d...........#...o...#',
+      '################################',
     ],
     guards: [
-      {
-        name: 'Vault Warden',
-        waypoints: [
-          { x: 120, y: 160 },
-          { x: 520, y: 160 },
-          { x: 520, y: 600 },
-          { x: 120, y: 600 },
-        ],
-      },
-      {
-        name: 'Corridor Guard',
-        waypoints: [
-          { x: 760, y: 160 },
-          { x: 1140, y: 160 },
-          { x: 1140, y: 600 },
-          { x: 760, y: 600 },
-        ],
-      },
-      {
-        name: 'Door Watcher',
-        waypoints: [
-          { x: 560, y: 400 },
-          { x: 620, y: 400 },
-          { x: 620, y: 580 },
-          { x: 560, y: 580 },
-        ],
-      },
+      { wp: [[2, 1], [6, 1], [6, 2], [2, 2]], speed: 1.7 },
+      { wp: [[25, 1], [29, 1], [29, 2], [25, 2]], speed: 1.7 },
+      { wp: [[12, 11], [20, 11], [20, 15], [12, 15]], speed: 1.9 },
     ],
     cameras: [
-      { x: 400, y: 110, baseAngle: Math.PI / 2, sweep: 0.5, speed: 0.8 },
-      { x: 1250, y: 480, baseAngle: Math.PI, sweep: 0.5, speed: 0.7 },
-      { x: 850, y: 650, baseAngle: -Math.PI / 2, sweep: 0.6, speed: 0.9 },
+      { tx: 15, ty: 1, angle: 90, arc: 80, speed: 0.6 },
+      { tx: 28, ty: 5, angle: 180, arc: 60, speed: 0.5 },
+      { tx: 3, ty: 13, angle: 0, arc: 60, speed: 0.5 },
     ],
-    loot: [
-      { x: 300, y: 260, kind: 'gem', label: 'Vault Ruby' },
-      { x: 560, y: 600, kind: 'painting', label: 'Old Master' },
-      { x: 800, y: 150, kind: 'statue', label: 'Golden Owl' },
-      { x: 1080, y: 300, kind: 'vase', label: 'Jade Vase' },
-      { x: 1150, y: 620, kind: 'gem', label: 'Vault Diamond' },
+    lasers: [
+      { x1: 11, y1: 1, x2: 20, y2: 1, phase: 0 },
+      { x1: 11, y1: 6, x2: 20, y2: 6, phase: 0.6 },
+      { x1: 11, y1: 10, x2: 20, y2: 10, phase: 1.2 },
     ],
   },
   {
+    id: 3,
     name: 'The Penthouse',
-    intro: 'The final score. An open penthouse, three patrols, six prizes. Take it all.',
-    playerStart: { x: 80, y: 140 },
-    exit: { x: 1200, y: 130 },
-    walls: [
-      { x: 400, y: 250, w: 60, h: 60 },
-      { x: 850, y: 250, w: 60, h: 60 },
-      { x: 400, y: 480, w: 60, h: 60 },
-      { x: 850, y: 480, w: 60, h: 60 },
-      { x: 560, y: 360, w: 180, h: 16 },
-    ],
-    shadows: [
-      { x: 500, y: 200, w: 200, h: 80 },
-      { x: 60, y: 500, w: 160, h: 100 },
+    sub: 'Gems and papers of the Meridian suite',
+    palette: {
+      floor: '#3a2d47', floor2: '#332741', wall: '#140f1c', wallTop: '#4a3560',
+      rug: '#4a2e4d', rugEdge: '#e08ab8', accent: '#e08ab8', shadow: '#1a1224',
+      glow: 'rgba(224,138,184,0.55)',
+    },
+    map: [
+      '################################',
+      '#....j.....rrrrrr......d.......#',
+      '#...........rrrrrr.............#',
+      '#..TT.......rrrrrr....TT...K...#',
+      '#...........rrrrrr.............#',
+      '#....A......rrrrrr......A......#',
+      '#####.##################.#######',
+      '#,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,#',
+      '#....TT.......P.......TT.......#',
+      '#,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,#',
+      '#####.##################.#######',
+      '#......#........#..............#',
+      '#..j...#...TT...#...d....E.....#',
+      '#......#........#..............#',
+      '#..A...#........#...TT.........#',
+      '#......#...C....#..............#',
+      '#......#........#..............#',
+      '################################',
     ],
     guards: [
-      {
-        name: 'Penthouse Guard',
-        waypoints: [
-          { x: 150, y: 150 },
-          { x: 150, y: 600 },
-          { x: 350, y: 600 },
-          { x: 350, y: 150 },
-        ],
-      },
-      {
-        name: 'Terrace Guard',
-        waypoints: [
-          { x: 950, y: 150 },
-          { x: 950, y: 600 },
-          { x: 1120, y: 600 },
-          { x: 1120, y: 150 },
-        ],
-      },
-      {
-        name: 'Hall Guard',
-        waypoints: [
-          { x: 520, y: 150 },
-          { x: 520, y: 600 },
-          { x: 760, y: 600 },
-          { x: 760, y: 150 },
-        ],
-      },
+      { wp: [[2, 1], [13, 1], [13, 4], [2, 4]], speed: 1.8 },
+      { wp: [[18, 1], [28, 1], [28, 4], [18, 4]], speed: 1.8 },
+      { wp: [[8, 11], [8, 16], [14, 16], [14, 11]], speed: 2.0 },
     ],
     cameras: [
-      { x: 640, y: 110, baseAngle: Math.PI / 2, sweep: 0.7, speed: 0.8 },
-      { x: 1250, y: 360, baseAngle: Math.PI, sweep: 0.6, speed: 1.0 },
+      { tx: 29, ty: 3, angle: 180, arc: 70, speed: 0.55 },
+      { tx: 2, ty: 12, angle: 0, arc: 70, speed: 0.5 },
     ],
-    loot: [
-      { x: 200, y: 350, kind: 'painting', label: 'Midnight Portrait' },
-      { x: 1100, y: 350, kind: 'gem', label: 'Crown Jewel' },
-      { x: 640, y: 300, kind: 'statue', label: 'Gold Panther' },
-      { x: 640, y: 470, kind: 'vase', label: 'Crystal Vase' },
-      { x: 300, y: 620, kind: 'gem', label: 'Penthouse Opal' },
-      { x: 1000, y: 620, kind: 'painting', label: 'Aurora Canvas' },
+    lasers: [],
+  },
+  {
+    id: 4,
+    name: 'The Rooftop Getaway',
+    sub: 'One last grab — then the helicopter',
+    palette: {
+      floor: '#242e46', floor2: '#202840', wall: '#0a0e1a', wallTop: '#33415e',
+      rug: '#26324e', rugEdge: '#7fd4ff', accent: '#7fd4ff', shadow: '#11182a',
+      glow: 'rgba(127,212,255,0.55)',
+    },
+    map: [
+      '################################',
+      '#..d...#.....j.....#.....d.....#',
+      '#......#...........#...........#',
+      '#..TT..#..rrrrrr...#..TT...K..#',
+      '#......#..rrrrrr...#...........#',
+      '#..A...#..rrrrrr...#.....A.....#',
+      '####+#####....X....####+########',
+      '#,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,#',
+      '#..TT......A....P.....TT....A..#',
+      '#,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,#',
+      '####+#####....X....####+########',
+      '#......#...........#...........#',
+      '#..j...#...TT......#...d....E..#',
+      '#......#...........#...........#',
+      '#..A...#.....C.....#...TT......#',
+      '#......#...........#...........#',
+      '#..o...#.....j.....#.....o.....#',
+      '################################',
+    ],
+    guards: [
+      { wp: [[2, 1], [6, 1], [6, 4], [2, 4]], speed: 2.0 },
+      { wp: [[25, 1], [29, 1], [29, 5], [25, 5]], speed: 2.0 },
+      { wp: [[12, 11], [20, 11], [20, 16], [12, 16]], speed: 2.1 },
+      { wp: [[12, 7], [12, 9], [19, 9], [19, 7]], speed: 2.2 },
+    ],
+    cameras: [
+      { tx: 15, ty: 1, angle: 90, arc: 80, speed: 0.65 },
+      { tx: 28, ty: 3, angle: 180, arc: 70, speed: 0.6 },
+      { tx: 3, ty: 13, angle: 0, arc: 70, speed: 0.55 },
+    ],
+    lasers: [
+      { x1: 11, y1: 6, x2: 20, y2: 6, phase: 0 },
+      { x1: 11, y1: 10, x2: 20, y2: 10, phase: 0.9 },
     ],
   },
 ];
+
+export const LOOT_DEFS = {
+  p: { name: 'Painting', value: 500, color: '#e8c15a' },
+  g: { name: 'Gold Bar', value: 300, color: '#f5d76e' },
+  j: { name: 'Gem', value: 800, color: '#7fe3ff' },
+  d: { name: 'Documents', value: 1000, color: '#f2ead8' },
+};
+
+// Normalize every map row to exactly COLS chars (pad with wall).
+export function normalizeMap(map) {
+  return map.map((row) => (row + '#'.repeat(COLS)).slice(0, COLS));
+}

@@ -3,14 +3,89 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Gilded Heist — a quiet robbery in three rooms</title>
+<title>VELVET SHADOW — A Gilded Heist</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<main class="stage">
+<div id="wrap">
+  <div id="hud">
+    <div class="hud-left"><span id="hudLevel">LEVEL 1</span><span id="hudLootLeft" class="pill">4 LOOT LEFT</span></div>
+    <div class="hud-mid">
+      <span class="label">LOOT</span><span id="hudLoot" class="gold">$0</span>
+      <span class="label">ALARM</span>
+      <div id="alarmBar"><div id="alarmFill"></div></div>
+      <span id="alarmText">QUIET</span>
+    </div>
+    <div class="hud-right"><span id="hudTime">0:00</span><span id="hudBest"></span><button id="muteBtn" title="Mute (M)">🔊</button></div>
+  </div>
   <canvas id="game" width="1280" height="720"></canvas>
-  <p class="hint">Gilded Heist — move with WASD or arrows, hold C to sneak, SHIFT to dash, E to hack a camera.</p>
-</main>
+  <div id="hint">WASD / arrows move &nbsp;·&nbsp; SHIFT run (loud) &nbsp;·&nbsp; C sneak &nbsp;·&nbsp; E hack camera / hide in closet &nbsp;·&nbsp; Click to move &nbsp;·&nbsp; ESC pause &nbsp;·&nbsp; M mute</div>
+
+  <div id="titleScreen" class="overlay">
+    <div class="panel">
+      <div class="kicker">MAKE.FUN BOUNTY · BEST HEIST GAME</div>
+      <h1>VELVET<br>SHADOW</h1>
+      <p class="tag">Four rooftops. One night. Everything gold.</p>
+      <p class="story">The Meridian Collection opens at midnight. Slip past the patrols, cut the
+      cameras, lift every painting, bar, gem and paper — and be on the roof before the city wakes.</p>
+      <div class="controls">
+        <div><b>WASD / ←↑↓→</b> move</div>
+        <div><b>SHIFT</b> run — fast, but guards hear you</div>
+        <div><b>C</b> sneak — slow, quiet, harder to spot</div>
+        <div><b>E</b> hold to hack a camera · press near a closet to hide</div>
+        <div><b>Click</b> the floor to walk there &nbsp;·&nbsp; <b>ESC</b> pause</div>
+      </div>
+      <button id="startBtn" class="big">BEGIN THE HEIST →</button>
+      <p class="foot">Dark corners hide you. Gold glows. Red cones see you. Good luck, shadow.</p>
+    </div>
+  </div>
+
+  <div id="introScreen" class="overlay hidden">
+    <div class="intro-card">
+      <div id="introTitle">LEVEL 1</div>
+      <div id="introSub"></div>
+    </div>
+  </div>
+
+  <div id="pauseScreen" class="overlay hidden">
+    <div class="panel small">
+      <h2>PAUSED</h2>
+      <p class="tag">The guards wait for no one. Well — right now they do.</p>
+      <button id="resumeBtn" class="big">RESUME →</button>
+      <button id="titleBtn" class="ghost">BACK TO TITLE</button>
+    </div>
+  </div>
+
+  <div id="doneScreen" class="overlay hidden">
+    <div class="panel small">
+      <div class="kicker">CLEAN GETAWAY</div>
+      <h2 id="doneTitle">LEVEL CLEARED</h2>
+      <p id="doneStats" class="tag"></p>
+      <button id="nextBtn" class="big">NEXT LEVEL →</button>
+    </div>
+  </div>
+
+  <div id="caughtScreen" class="overlay hidden">
+    <div class="panel small">
+      <div class="kicker red">CAUGHT</div>
+      <h2>THE JOB IS BLOWN</h2>
+      <p id="caughtReason" class="tag"></p>
+      <p id="caughtStats" class="tag"></p>
+      <button id="retryBtn" class="big">TRY THIS LEVEL AGAIN →</button>
+    </div>
+  </div>
+
+  <div id="winScreen" class="overlay hidden">
+    <div class="panel">
+      <div class="kicker">THE HELICOPTER LIFTS OFF</div>
+      <h1>HEIST<br>COMPLETE</h1>
+      <p id="winStats" class="tag"></p>
+      <p class="story">Four wings, four getaways, not a single alarm that mattered.
+      The Meridian Collection is yours — and the city never saw your face.</p>
+      <button id="againBtn" class="big">RUN IT AGAIN →</button>
+    </div>
+  </div>
+</div>
 <script type="module" src="js/main.js"></script>
 </body>
 </html>

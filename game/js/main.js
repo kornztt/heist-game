@@ -1,372 +1,461 @@
-// Gilded Heist — main: the game loop, input, alarm, loot and win/caught rules.
-// One job: run the heist — own the state machine and tie levels, entities,
-// rendering and sound together. Bootstrapped by index.html.
+// VELVET SHADOW — game state, input, loop, screens, staging for screenshots.
+import { TILE, COLS, ROWS, LEVELS, LOOT_DEFS, normalizeMap } from './levels.js';
+import { Guard, Camera, Loot, Particle, burst, dist, losBlocked } from './entities.js';
+import { Renderer } from './render.js';
+import { SoundBank } from './audio.js';
 
-import { LEVELS, PLAY } from './levels.js';
-import {
-  makeGuards,
-  makeCameras,
-  updateGuard,
-  updateCamera,
-  moveCircle,
-  inShadow,
-  noiseAlert,
-  PLAYER_RADIUS,
-} from './entities.js';
-import { drawWorld, drawHud, drawTitle, drawCaught, drawWin, drawLevelClear } from './render.js';
-import { sounds } from './audio.js';
+const $ = (id) => document.getElementById(id);
 
-const BEST_KEY = 'gildedHeistBestMs';
-const WALK_SPEED = 155;
-const SNEAK_SPEED = 80;
-const DASH_SPEED = 285;
-const DASH_SECONDS = 0.22;
-const DASH_COOLDOWN = 1.2;
-const HACK_RANGE = 78;
-const HACK_COST = 6;
-
-const canvas = document.getElementById('game');
-const ctx = canvas.getContext('2d');
-
-function loadBest() {
-  try {
-    const raw = window.localStorage.getItem(BEST_KEY);
-    const n = raw === null ? null : Number(raw);
-    return Number.isFinite(n) && n > 0 ? n : null;
-  } catch {
-    return null;
+export class Game {
+  constructor() {
+    this.cv = $('game');
+    this.renderer = new Renderer(this.cv);
+    this.sound = new SoundBank();
+    this.levelIdx = 0;
+    this.state = 'title'; // title | intro | playing | paused | leveldone | caught | win
+    this.time = 0;
+    this.levelTime = 0;
+    this.totalLoot = 0;
+    this.totalTime = 0;
+    this.alarm = 0;
+    this.frozen = false;
+    this.particles = [];
+    this.keys = {};
+    this.moveTarget = null;
+    this.hearing = null;
+    this.shakeT = 0;
+    this.caughtReason = '';
+    this.bestKey = 'velvet-shadow-best-total';
+    this.best = +(localStorage.getItem(this.bestKey) || 0);
+    this.setupInput();
+    this.showTitle();
+    this.last = performance.now();
+    requestAnimationFrame((t) => this.loop(t));
   }
-}
 
-function saveBest(ms) {
-  try {
-    window.localStorage.setItem(BEST_KEY, String(Math.floor(ms)));
-  } catch {
-    // Private mode or blocked storage: the game still plays.
-  }
-}
-
-const game = {
-  screen: 'title', // title | playing | levelclear | caught | win
-  levelIndex: 0,
-  level: null,
-  guards: [],
-  cameras: [],
-  player: null,
-  alarm: 0,
-  lootGot: 0,
-  lootTotal: 0,
-  lootLeft: 0,
-  runMs: 0,
-  levelMs: 0,
-  bestMs: loadBest(),
-  time: 0,
-  caughtReason: '',
-  clearTimer: 0,
-  nearCamera: null,
-  startButton: null,
-  dashTime: 0,
-  dashCooldown: 0,
-  keys: new Set(),
-};
-
-function loadLevel(index) {
-  const def = LEVELS[index];
-  game.levelIndex = index;
-  game.level = {
-    ...def,
-    loot: def.loot.map((l) => ({ ...l, taken: false })),
-  };
-  game.guards = makeGuards(def.guards);
-  game.cameras = makeCameras(def.cameras);
-  game.player = {
-    x: def.playerStart.x,
-    y: def.playerStart.y,
-    r: PLAYER_RADIUS,
-    facing: 0,
-    sneaking: false,
-    inShadow: false,
-  };
-  game.alarm = 0;
-  game.lootGot = 0;
-  game.lootTotal = def.loot.length;
-  game.lootLeft = def.loot.length;
-  game.levelMs = 0;
-  game.dashTime = 0;
-  game.dashCooldown = 0;
-  game.nearCamera = null;
-}
-
-function startGame() {
-  loadLevel(0);
-  game.runMs = 0;
-  game.screen = 'playing';
-  sounds.ensure();
-  sounds.click();
-}
-
-function nextLevel() {
-  if (game.levelIndex + 1 >= LEVELS.length) {
-    game.screen = 'win';
-    sounds.win();
-    if (game.bestMs === null || game.runMs < game.bestMs) {
-      game.bestMs = game.runMs;
-      saveBest(game.runMs);
+  // ---------- level loading ----------
+  loadLevel(idx) {
+    const def = LEVELS[idx];
+    this.levelIdx = idx;
+    this.def = def;
+    this.grid = normalizeMap(def.map).map((r) => r.split(''));
+    this.palette = def.palette;
+    this.loot = [];
+    this.exit = null;
+    this.closets = [];
+    this.lasers = (def.lasers || []).map((l) => ({ ...l }));
+    let px = 0, py = 0;
+    for (let y = 0; y < ROWS; y++) {
+      for (let x = 0; x < COLS; x++) {
+        const c = this.grid[y][x];
+        if (c === 'P') { px = (x + 0.5) * TILE; py = (y + 0.5) * TILE; this.grid[y][x] = '.'; }
+        if (c === 'E') { this.exit = { x: (x + 0.5) * TILE, y: (y + 0.5) * TILE }; this.grid[y][x] = '.'; }
+        if (c === 'C') this.closets.push({ x: (x + 0.5) * TILE, y: (y + 0.5) * TILE });
+        if (c === 'p' || c === 'g' || c === 'j' || c === 'd') {
+          this.loot.push(new Loot(x, y, c));
+          this.grid[y][x] = '.';
+        }
+      }
     }
-    return;
-  }
-  loadLevel(game.levelIndex + 1);
-  game.screen = 'levelclear';
-  game.clearTimer = 2.0;
-  sounds.levelClear();
-}
-
-function caught(reason) {
-  if (game.screen !== 'playing') return;
-  game.screen = 'caught';
-  game.caughtReason = reason;
-  sounds.caught();
-}
-
-function tryHack() {
-  if (!game.nearCamera) return;
-  game.nearCamera.disabled = true;
-  game.alarm = Math.min(100, game.alarm + HACK_COST);
-  game.nearCamera = null;
-  sounds.hack();
-}
-
-function tryDash() {
-  if (game.dashCooldown > 0 || game.dashTime > 0) return;
-  game.dashTime = DASH_SECONDS;
-  game.dashCooldown = DASH_COOLDOWN;
-  noiseAlert(game.guards, game.player.x, game.player.y, 150);
-  sounds.dash();
-}
-
-function updatePlaying(dt) {
-  const p = game.player;
-  const keys = game.keys;
-  const left = keys.has('KeyA') || keys.has('ArrowLeft');
-  const right = keys.has('KeyD') || keys.has('ArrowRight');
-  const up = keys.has('KeyW') || keys.has('ArrowUp');
-  const down = keys.has('KeyS') || keys.has('ArrowDown');
-  p.sneaking = keys.has('KeyC') || keys.has('ControlLeft') || keys.has('ControlRight');
-  p.inShadow = inShadow(p.x, p.y, game.level.shadows);
-
-  let mx = (right ? 1 : 0) - (left ? 1 : 0);
-  let my = (down ? 1 : 0) - (up ? 1 : 0);
-  if (mx !== 0 || my !== 0) {
-    const len = Math.hypot(mx, my);
-    mx /= len;
-    my /= len;
-    p.facing = Math.atan2(my, mx);
-    if (game.dashTime > 0) {
-      moveCircle(p, mx * DASH_SPEED * dt, my * DASH_SPEED * dt, game.level.walls);
-    } else {
-      const speed = p.sneaking ? SNEAK_SPEED : WALK_SPEED;
-      moveCircle(p, mx * speed * dt, my * speed * dt, game.level.walls);
-    }
-  }
-  if (game.dashTime > 0) game.dashTime -= dt;
-  if (game.dashCooldown > 0) game.dashCooldown -= dt;
-
-  // Guards and cameras.
-  let spotted = false;
-  for (const g of game.guards) {
-    const result = updateGuard(g, p, game.level.walls, dt, (guard, strength) => {
-      if (guard.state === 'alert' && strength > 0.4) spotted = true;
-    });
-    if (result === 'caught') {
-      caught('A guard grabbed you in the open.');
-      return;
-    }
-    if (g.state === 'suspicious' || g.state === 'alert') spotted = true;
-  }
-  if (spotted && !game._spottedSoundAt) {
-    game._spottedSoundAt = game.time;
-    sounds.spotted();
-  }
-  if (!spotted) game._spottedSoundAt = 0;
-
-  let cameraRise = 0;
-  for (const cam of game.cameras) {
-    cameraRise += updateCamera(cam, p, game.level.walls, game.time);
-  }
-
-  // Alarm: rise while seen, fall while hidden (faster in shadow).
-  const guardRise = game.guards.reduce((sum, g) => {
-    if (g.state === 'alert') return sum + 26;
-    if (g.state === 'suspicious') return sum + 10;
-    return sum;
-  }, 0);
-  const rise = guardRise + cameraRise;
-  if (rise > 0) {
-    game.alarm = Math.min(100, game.alarm + rise * dt);
-  } else {
-    const decay = p.inShadow ? 14 : 6;
-    game.alarm = Math.max(0, game.alarm - decay * dt);
-  }
-  if (game.alarm >= 100) {
-    caught('The alarm hit 100% — security locked the building down.');
-    return;
-  }
-
-  // Hackable camera in reach?
-  game.nearCamera = null;
-  for (const cam of game.cameras) {
-    if (cam.disabled) continue;
-    if (Math.hypot(cam.x - p.x, cam.y - p.y) < HACK_RANGE) {
-      game.nearCamera = cam;
-      break;
-    }
-  }
-
-  // Loot pickup.
-  for (const item of game.level.loot) {
-    if (item.taken) continue;
-    if (Math.hypot(item.x - p.x, item.y - p.y) < 30) {
-      item.taken = true;
-      game.lootGot++;
-      game.lootLeft--;
-      sounds.pickup();
-    }
-  }
-
-  // Exit.
-  if (game.lootLeft === 0) {
-    const e = game.level.exit;
-    if (Math.hypot(e.x - p.x, e.y - p.y) < 34) {
-      nextLevel();
-    }
-  }
-}
-
-function update(dt) {
-  game.time += dt;
-  if (game.screen === 'playing') {
-    game.runMs += dt * 1000;
-    game.levelMs += dt * 1000;
-    updatePlaying(dt);
-  } else if (game.screen === 'levelclear') {
-    game.clearTimer -= dt;
-    if (game.clearTimer <= 0) game.screen = 'playing';
-  }
-}
-
-function render() {
-  ctx.clearRect(0, 0, 1280, 720);
-  if (game.screen === 'title') {
-    drawTitle(ctx, game);
-    return;
-  }
-  drawWorld(ctx, game, game.time);
-  drawHud(ctx, game);
-  if (game.screen === 'caught') drawCaught(ctx, game);
-  else if (game.screen === 'win') drawWin(ctx, game);
-  else if (game.screen === 'levelclear') drawLevelClear(ctx, game);
-}
-
-let last = performance.now();
-function loop(now) {
-  const dt = Math.min(0.05, (now - last) / 1000);
-  last = now;
-  update(dt);
-  render();
-  requestAnimationFrame(loop);
-}
-
-function onKeyDown(e) {
-  sounds.ensure();
-  if (e.code === 'KeyM') {
-    const on = sounds.toggleMusic();
-    e.preventDefault();
-    return on;
-  }
-  if (game.screen === 'title' && (e.code === 'Enter' || e.code === 'Space')) {
-    startGame();
-    e.preventDefault();
-    return;
-  }
-  if ((game.screen === 'caught' || game.screen === 'win') && e.code === 'KeyR') {
-    startGame();
-    e.preventDefault();
-    return;
-  }
-  if (game.screen === 'playing') {
-    if (e.code === 'KeyE') {
-      tryHack();
-      e.preventDefault();
-      return;
-    }
-    if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
-      tryDash();
-      e.preventDefault();
-      return;
-    }
-  }
-  game.keys.add(e.code);
-  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
-}
-
-function onKeyUp(e) {
-  game.keys.delete(e.code);
-}
-
-function onClick(e) {
-  sounds.ensure();
-  if (game.screen !== 'title' || !game.startButton) return;
-  const rect = canvas.getBoundingClientRect();
-  const x = ((e.clientX - rect.left) / rect.width) * 1280;
-  const y = ((e.clientY - rect.top) / rect.height) * 720;
-  const b = game.startButton;
-  if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) startGame();
-}
-
-window.addEventListener('keydown', onKeyDown);
-window.addEventListener('keyup', onKeyUp);
-canvas.addEventListener('click', onClick);
-
-loadLevel(0);
-requestAnimationFrame(loop);
-
-// Small test hook for the maker's own browser probes: read state, start the
-// game, move the thief, set the alarm. It plays no part in the game itself.
-window.__GILDED_HEIST = {
-  state() {
-    return {
-      screen: game.screen,
-      levelIndex: game.levelIndex,
-      levelName: game.level.name,
-      alarm: game.alarm,
-      lootGot: game.lootGot,
-      lootTotal: game.lootTotal,
-      lootLeft: game.lootLeft,
-      runMs: game.runMs,
-      bestMs: game.bestMs,
-      player: { x: game.player.x, y: game.player.y, sneaking: game.player.sneaking },
-      guards: game.guards.map((g) => ({ name: g.name, x: g.x, y: g.y, state: g.state, awareness: g.awareness })),
-      cameras: game.cameras.map((c) => ({ x: c.x, y: c.y, disabled: c.disabled })),
-      nearCamera: game.nearCamera !== null,
-      exit: { ...game.level.exit },
-      loot: game.level.loot.map((l) => ({ x: l.x, y: l.y, taken: l.taken })),
+    this.player = {
+      x: px, y: py, facing: 0, sneak: false, run: false,
+      hidden: false, hiddenCloset: null, speed: 150, stepAcc: 0,
     };
-  },
-  start: startGame,
-  loadLevel(i) {
-    loadLevel(i);
-    game.screen = 'playing';
-  },
-  teleport(x, y) {
-    game.player.x = Math.max(PLAY.x + 20, Math.min(PLAY.x + PLAY.w - 20, x));
-    game.player.y = Math.max(PLAY.y + 20, Math.min(PLAY.y + PLAY.h - 20, y));
-  },
-  setAlarm(v) {
-    game.alarm = Math.max(0, Math.min(100, v));
-  },
-  collectAll() {
-    for (const item of game.level.loot) item.taken = true;
-    game.lootGot = game.lootTotal;
-    game.lootLeft = 0;
-  },
-};
+    this.guards = def.guards.map((g) => new Guard(g, this.grid));
+    this.cameras = def.cameras.map((c) => new Camera(c));
+    this.lootLeft = this.loot.length;
+    this.levelTime = 0;
+    this.alarm = 0;
+    this.particles = [];
+    this.moveTarget = null;
+    this.renderer.prepareLevel(idx, this.grid);
+    this.updateHud();
+  }
+
+  get lootValue() {
+    return this.loot.filter((l) => l.taken).reduce((s, l) => s + l.def.value, 0);
+  }
+
+  // ---------- input ----------
+  setupInput() {
+    const cv = this.cv;
+    window.addEventListener('keydown', (e) => {
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) e.preventDefault();
+      this.keys[e.key.toLowerCase()] = true;
+      if (e.key.toLowerCase() === 'c' && !e.repeat) this.player && (this.player.sneak = !this.player.sneak);
+      if ((e.key === 'Escape' || e.key.toLowerCase() === 'p') && !e.repeat) this.togglePause();
+      if (e.key.toLowerCase() === 'm' && !e.repeat) {
+        const m = this.sound.toggleMute();
+        $('muteBtn').textContent = m ? '🔇' : '🔊';
+      }
+      if (e.key.toLowerCase() === 'e' && this.state === 'playing') this.tryHideToggle();
+    });
+    window.addEventListener('keyup', (e) => { this.keys[e.key.toLowerCase()] = false; });
+    cv.addEventListener('mousedown', (e) => {
+      if (this.state !== 'playing') return;
+      const r = cv.getBoundingClientRect();
+      const x = (e.clientX - r.left) * (cv.width / r.width);
+      const y = (e.clientY - r.top) * (cv.height / r.height);
+      this.moveTarget = { x, y };
+      this.sound.ensure();
+    });
+    $('startBtn').addEventListener('click', () => { this.sound.ensure(); this.sound.startMusic(); this.sound.click(); this.startRun(); });
+    $('retryBtn').addEventListener('click', () => { this.sound.click(); this.retryLevel(); });
+    $('nextBtn').addEventListener('click', () => { this.sound.click(); this.nextLevel(); });
+    $('againBtn').addEventListener('click', () => { this.sound.click(); this.startRun(); });
+    $('resumeBtn').addEventListener('click', () => { this.sound.click(); this.togglePause(); });
+    $('muteBtn').addEventListener('click', () => {
+      const m = this.sound.toggleMute();
+      $('muteBtn').textContent = m ? '🔇' : '🔊';
+    });
+    $('titleBtn').addEventListener('click', () => { this.sound.click(); this.showTitle(); });
+  }
+
+  // ---------- flow ----------
+  startRun() {
+    this.totalLoot = 0;
+    this.totalTime = 0;
+    this.loadLevel(0);
+    this.showIntro();
+  }
+  retryLevel() {
+    this.totalLoot -= this.lootValue;
+    this.loadLevel(this.levelIdx);
+    this.showIntro();
+  }
+  nextLevel() {
+    this.totalTime += this.levelTime;
+    if (this.levelIdx + 1 >= LEVELS.length) { this.showWin(); return; }
+    this.loadLevel(this.levelIdx + 1);
+    this.showIntro();
+  }
+  showTitle() {
+    this.state = 'title';
+    this.loadLevel(0);
+    this.setOverlay('titleScreen', true);
+    ['introScreen', 'pauseScreen', 'doneScreen', 'caughtScreen', 'winScreen'].forEach((id) => this.setOverlay(id, false));
+    this.updateHud();
+  }
+  showIntro() {
+    this.state = 'intro';
+    $('introTitle').textContent = `LEVEL ${this.levelIdx + 1} — ${this.def.name}`;
+    $('introSub').textContent = this.def.sub;
+    this.setOverlay('introScreen', true);
+    ['titleScreen', 'pauseScreen', 'doneScreen', 'caughtScreen', 'winScreen'].forEach((id) => this.setOverlay(id, false));
+    this.introT = 0;
+  }
+  togglePause() {
+    if (this.state === 'playing') {
+      this.state = 'paused';
+      this.setOverlay('pauseScreen', true);
+    } else if (this.state === 'paused') {
+      this.state = 'playing';
+      this.setOverlay('pauseScreen', false);
+    }
+  }
+  showLevelDone() {
+    this.state = 'leveldone';
+    this.sound.levelDone();
+    $('doneTitle').textContent = `${this.def.name} — CLEARED`;
+    $('doneStats').textContent = `Loot $${this.lootValue.toLocaleString()}  •  Time ${this.fmt(this.levelTime)}  •  Alarm peak ${Math.round(this.peakAlarm || 0)}%`;
+    $('nextBtn').textContent = this.levelIdx + 1 >= LEVELS.length ? 'FINISH THE HEIST →' : 'NEXT LEVEL →';
+    this.setOverlay('doneScreen', true);
+  }
+  showCaught(reason) {
+    if (this.state !== 'playing') return;
+    this.state = 'caught';
+    this.caughtReason = reason;
+    this.sound.caught();
+    this.sound.stopAlarm();
+    $('caughtReason').textContent = reason;
+    $('caughtStats').textContent = `Loot kept $${this.totalLoot.toLocaleString()}  •  ${this.def.name}`;
+    this.setOverlay('caughtScreen', true);
+  }
+  showWin() {
+    this.state = 'win';
+    this.sound.win();
+    this.sound.stopAlarm();
+    const total = this.totalTime + this.levelTime;
+    const isBest = !this.best || total < this.best;
+    if (isBest) {
+      this.best = total;
+      localStorage.setItem(this.bestKey, String(Math.round(total * 10) / 10));
+    }
+    $('winStats').textContent = `Total loot $${this.totalLoot.toLocaleString()}  •  Total time ${this.fmt(total)}${isBest ? '  •  NEW BEST TIME!' : `  •  Best ${this.fmt(this.best)}`}`;
+    this.setOverlay('winScreen', true);
+  }
+  setOverlay(id, on) { $(id).classList.toggle('hidden', !on); }
+
+  fmt(t) {
+    const m = Math.floor(t / 60);
+    const s = Math.floor(t % 60);
+    return `${m}:${String(s).padStart(2, '0')}`;
+  }
+
+  // ---------- interaction ----------
+  tryHideToggle() {
+    const pl = this.player;
+    if (pl.hidden) { pl.hidden = false; pl.hiddenCloset = null; return; }
+    for (const c of this.closets) {
+      if (dist(pl.x, pl.y, c.x, c.y) < 34) {
+        pl.hidden = true; pl.hiddenCloset = c;
+        pl.x = c.x; pl.y = c.y;
+        this.sound.click();
+        return;
+      }
+    }
+  }
+  nearestCamera() {
+    let best = null; let bd = 1e9;
+    for (const cam of this.cameras) {
+      if (cam.disabled) continue;
+      const d = dist(this.player.x, this.player.y, cam.x, cam.y);
+      if (d < bd) { bd = d; best = cam; }
+    }
+    return bd < 80 ? best : null;
+  }
+
+  // ---------- update ----------
+  loop(t) {
+    const dt = Math.min(0.05, (t - this.last) / 1000);
+    this.last = t;
+    if (this.state === 'playing') {
+      if (!this.frozen) this.update(dt);
+    }
+    if (this.state === 'intro') {
+      this.introT += dt;
+      if (this.introT > 1.6) {
+        this.state = 'playing';
+        this.setOverlay('introScreen', false);
+      }
+    }
+    this.renderer.draw(this, dt);
+    this.updateHud();
+    requestAnimationFrame((tt) => this.loop(tt));
+  }
+
+  update(dt) {
+    this.time += dt;
+    this.levelTime += dt;
+    const pl = this.player;
+    // --- movement ---
+    let mx = 0, my = 0;
+    if (this.keys['w'] || this.keys['arrowup']) my -= 1;
+    if (this.keys['s'] || this.keys['arrowdown']) my += 1;
+    if (this.keys['a'] || this.keys['arrowleft']) mx -= 1;
+    if (this.keys['d'] || this.keys['arrowright']) mx += 1;
+    if (mx || my) this.moveTarget = null;
+    if (this.moveTarget) {
+      const dx = this.moveTarget.x - pl.x;
+      const dy = this.moveTarget.y - pl.y;
+      if (Math.hypot(dx, dy) < 8) this.moveTarget = null;
+      else { mx = dx / Math.hypot(dx, dy); my = dy / Math.hypot(dx, dy); }
+    }
+    pl.run = !!(this.keys['shift']) && !pl.sneak;
+    const speed = pl.sneak ? 85 : pl.run ? 235 : 150;
+    if ((mx || my) && !pl.hidden) {
+      const len = Math.hypot(mx, my);
+      const nx = pl.x + (mx / len) * speed * dt;
+      const ny = pl.y + (my / len) * speed * dt;
+      pl.facing = Math.atan2(my, mx);
+      if (!this.hitsWall(nx, pl.y)) pl.x = nx;
+      if (!this.hitsWall(pl.x, ny)) pl.y = ny;
+      pl.stepAcc += speed * dt;
+      if (pl.stepAcc > (pl.run ? 26 : 34)) {
+        pl.stepAcc = 0;
+        this.sound.step(pl.run);
+        if (pl.run) this.hearing = { x: pl.x, y: pl.y, r: 170 };
+      }
+    }
+    if (this.hearing) this.hearing.r = Math.max(0, this.hearing.r - dt * 220);
+
+    // --- guards & cameras ---
+    let anySee = false;
+    for (const gd of this.guards) {
+      gd.update(dt, pl, this.grid, this.hearing);
+      if (gd.state === 'alarmed') anySee = true;
+      if (!pl.hidden && dist(gd.x, gd.y, pl.x, pl.y) < 24) {
+        this.showCaught('A guard grabbed you in the dark.');
+        return;
+      }
+    }
+    let camSee = 0;
+    for (const cam of this.cameras) {
+      const v = cam.update(dt, pl, this.grid);
+      camSee = Math.max(camSee, v);
+      if (v > 0.12) anySee = true;
+    }
+    if (camSee > 0.12) this.alarm = Math.min(100, this.alarm + camSee * 42 * dt);
+    const alarmed = this.guards.some((g) => g.state === 'alarmed');
+    if (alarmed) this.alarm = Math.min(100, this.alarm + 16 * dt);
+    if (this.guards.some((g) => g.state === 'suspicious')) this.alarm = Math.min(100, this.alarm + 4 * dt);
+
+    // --- alarm decay (faster when hidden) ---
+    const inShadow = this.tileAt(pl.x, pl.y) === ',';
+    if (!anySee && camSee <= 0.12 && !alarmed) {
+      const rate = pl.hidden ? 22 : inShadow ? 14 : 6;
+      this.alarm = Math.max(0, this.alarm - rate * dt);
+    }
+    this.peakAlarm = Math.max(this.peakAlarm || 0, this.alarm);
+    if (this.alarm > 55) this.sound.startAlarm(); else this.sound.stopAlarm();
+    if (this.alarm > 70 && !this.alarmWarned) {
+      this.alarmWarned = true;
+      this.renderer.addShake(7);
+      this.sound.spotted();
+    }
+    if (this.alarm < 40) this.alarmWarned = false;
+
+    // --- hack ---
+    const cam = this.nearestCamera();
+    if (cam && this.keys['e'] && !pl.hidden) {
+      cam.hack += dt / 2.2;
+      if (Math.random() < dt * 8) this.sound.hackTick(cam.hack);
+      if (cam.hack >= 1) {
+        cam.disabled = true;
+        burst(this.particles, cam.x, cam.y, '#ffd166', 18, 140);
+        this.sound.hackDone();
+      }
+    } else if (cam) {
+      cam.hack = Math.max(0, cam.hack - dt * 0.5);
+    }
+
+    // --- loot pickup ---
+    for (const l of this.loot) {
+      if (!l.taken && dist(pl.x, pl.y, l.x, l.y) < 26) {
+        l.taken = true;
+        this.lootLeft--;
+        burst(this.particles, l.x, l.y, l.def.color, 18, 130);
+        this.sound.pickup(l.def.value);
+      }
+    }
+
+    // --- lasers ---
+    for (const l of this.lasers) {
+      const on = Math.sin((this.time + l.phase) * 2.2) > -0.2;
+      if (!on) continue;
+      const x1 = l.x1 * TILE, y1 = (l.y1 + 0.5) * TILE;
+      const x2 = l.x2 * TILE, y2 = (l.y2 + 0.5) * TILE;
+      if (this.segHitsPlayer(x1, y1, x2, y2)) {
+        if (!l.hitCd || this.time > l.hitCd) {
+          l.hitCd = this.time + 1.2;
+          this.alarm = Math.min(100, this.alarm + 25);
+          burst(this.particles, pl.x, pl.y, '#ff4d5e', 16, 150);
+          this.renderer.addShake(6);
+          this.sound.laserZap();
+        }
+      }
+    }
+
+    // --- particles ---
+    for (const pt of this.particles) pt.update(dt);
+    this.particles = this.particles.filter((p) => !p.dead);
+
+    // --- exit ---
+    if (this.exit && this.lootLeft === 0 && dist(pl.x, pl.y, this.exit.x, this.exit.y) < 30) {
+      this.totalLoot += this.lootValue;
+      burst(this.particles, this.exit.x, this.exit.y, '#37e08a', 24, 160);
+      this.showLevelDone();
+    }
+  }
+
+  segHitsPlayer(x1, y1, x2, y2) {
+    const pl = this.player;
+    const dx = x2 - x1, dy = y2 - y1;
+    const len2 = dx * dx + dy * dy;
+    let t = ((pl.x - x1) * dx + (pl.y - y1) * dy) / (len2 || 1);
+    t = Math.max(0, Math.min(1, t));
+    const cx = x1 + t * dx, cy = y1 + t * dy;
+    return Math.hypot(pl.x - cx, pl.y - cy) < 16;
+  }
+
+  tileAt(x, y) {
+    const tx = Math.floor(x / TILE);
+    const ty = Math.floor(y / TILE);
+    if (ty < 0 || ty >= this.grid.length || tx < 0 || tx >= this.grid[0].length) return '#';
+    return this.grid[ty][tx];
+  }
+
+  hitsWall(x, y) {
+    const r = 12;
+    for (const [cx, cy] of [[x - r, y - r], [x + r, y - r], [x - r, y + r], [x + r, y + r]]) {
+      const c = this.tileAt(cx, cy);
+      if (c === '#' || c === 'T' || c === 'A') return true;
+    }
+    return false;
+  }
+
+  // ---------- HUD ----------
+  updateHud() {
+    $('hudLevel').textContent = `LEVEL ${this.levelIdx + 1} · ${this.def ? this.def.name : ''}`;
+    $('hudLoot').textContent = `$${(this.totalLoot + (this.lootValue || 0)).toLocaleString()}`;
+    const alarmEl = $('alarmFill');
+    alarmEl.style.width = `${Math.round(this.alarm || 0)}%`;
+    alarmEl.style.background = this.alarm > 70 ? '#ff4d5e' : this.alarm > 35 ? '#ffb042' : '#37e08a';
+    $('alarmText').textContent = this.alarm > 70 ? 'ALARM!' : this.alarm > 35 ? 'SUSPICIOUS' : 'QUIET';
+    $('hudTime').textContent = this.fmt((this.totalTime || 0) + (this.levelTime || 0));
+    $('hudBest').textContent = this.best ? `BEST ${this.fmt(this.best)}` : '';
+    const left = this.lootLeft ?? 0;
+    $('hudLootLeft').textContent = left === 0 ? 'EXIT OPEN' : `${left} LOOT LEFT`;
+  }
+}
+
+// ---------- boot + screenshot staging ----------
+function stageScene(game, scene) {
+  const pl = game.player;
+  const setGuard = (i, tx, ty, facingDeg, state, alert) => {
+    const g = game.guards[i];
+    if (!g) return;
+    g.x = (tx + 0.5) * TILE; g.y = (ty + 0.5) * TILE;
+    g.facing = (facingDeg * Math.PI) / 180;
+    g.state = state; g.alert = alert;
+    g.lastSeen = state === 'alarmed' ? { x: pl.x, y: pl.y } : null;
+  };
+  if (scene === 'cover') {
+    game.loadLevel(0);
+    pl.x = 20.5 * TILE; pl.y = 8.5 * TILE; pl.facing = Math.PI;
+    setGuard(0, 14, 8, 0, 'suspicious', 0.5);
+    game.alarm = 35;
+  } else if (scene === 'chase') {
+    game.loadLevel(0);
+    pl.x = 16.5 * TILE; pl.y = 8.5 * TILE; pl.facing = Math.PI;
+    setGuard(0, 13, 8, 0, 'alarmed', 0.9);
+    game.alarm = 78;
+  } else if (scene === 'vault') {
+    game.loadLevel(1);
+    pl.x = 15.5 * TILE; pl.y = 8.5 * TILE; pl.facing = -Math.PI / 2;
+    setGuard(2, 15, 13, -90, 'suspicious', 0.45);
+    game.alarm = 20;
+  } else if (scene === 'rooftop') {
+    game.loadLevel(3);
+    pl.x = 15.5 * TILE; pl.y = 8.5 * TILE; pl.facing = Math.PI / 2;
+    setGuard(2, 15, 12, 90, 'alarmed', 0.85);
+    game.alarm = 55;
+  }
+  game.state = 'playing';
+  game.frozen = true;
+  game.setOverlay('titleScreen', false);
+  ['introScreen', 'pauseScreen', 'doneScreen', 'caughtScreen', 'winScreen'].forEach((id) => game.setOverlay(id, false));
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  const game = new Game();
+  window.__heist = {
+    game,
+    start: () => game.startRun(),
+    state: () => ({
+      state: game.state,
+      level: game.levelIdx + 1,
+      alarm: Math.round(game.alarm),
+      lootValue: game.lootValue,
+      lootLeft: game.lootLeft,
+      player: { x: Math.round(game.player.x), y: Math.round(game.player.y), hidden: game.player.hidden, sneak: game.player.sneak },
+      guards: game.guards.map((g) => ({ state: g.state, alert: +g.alert.toFixed(2), x: Math.round(g.x), y: Math.round(g.y) })),
+      cameras: game.cameras.map((c) => ({ disabled: c.disabled, hack: +c.hack.toFixed(2), sees: +c.sees.toFixed(2) })),
+    }),
+  };
+  const scene = new URLSearchParams(location.search).get('scene');
+  if (scene) {
+    game.sound.ensure();
+    stageScene(game, scene);
+  }
+});

@@ -2,47 +2,71 @@
 [![rank](https://make.fun/badge/best-heist-game-20261122-0559/kornztt/heist-game/rank.svg)](https://make.fun/bounty/best-heist-game-20261122-0559)
 [![reward](https://make.fun/badge/best-heist-game-20261122-0559/kornztt/heist-game/reward.svg)](https://make.fun/bounty/best-heist-game-20261122-0559)
 
-# Gilded Heist
+# VELVET SHADOW — A Gilded Heist
 
-A top-down 2D heist game that runs in a desktop browser from static files — no
-network, no build step. Serve `game/` with any static HTTP server and open
-`game/index.html`.
+Four wings. One night. Everything gold.
 
-You are the thief. Cross three rooms — a museum gallery, a bank vault wing and
-a penthouse — grab every prize, and reach the exit before the alarm hits 100%.
-Guards and cameras both feed the same alarm meter, so a loud dash in front of
-a camera can end a run just as fast as a guard's grab.
+The Meridian Collection opens at midnight. Slip past the patrols, cut the
+cameras, lift every painting, bar, gem and paper — and be on the roof before
+the city wakes.
+
+## The game
+
+A top-down 2D canvas heist game. Static files, no network, keyboard + mouse.
+
+- **4 levels, 4 looks**: the Gilded Gallery, the Vault Wing (timed laser
+  grids), the Penthouse, and the Rooftop Getaway with a helicopter exit.
+- **Guards with three alert states** — calm, suspicious `?`, alarmed `!` —
+  patrol waypoints, sweeping vision cones that change color with alert, and
+  hearing: running is fast but loud.
+- **Cameras** sweep their cones and raise the alarm; stand close and hold
+  `E` to hack one dead, with a visible progress bar.
+- **Four loot types** with different values — paintings $500, gold $300,
+  gems $800, documents $1000 — and a running loot total.
+- **Alarm meter** that rises on detection and decays when you are hidden;
+  shadow floors and closets hide you faster. Sneak (`C`) to move slow and
+  quiet; the exit only opens once a level's loot is cleared.
+- **Feel**: dynamic lighting and shadows, floor textures and props, loot
+  glow, pickup particles, screen shake on alarm, and a full WebAudio
+  soundtrack — ambient pad, footsteps, pickup chimes, hack beeps, siren.
 
 ## How to play
 
-- **WASD / arrow keys** — move
-- **Hold C** — sneak (slower, harder to spot, quieter)
-- **SHIFT** — dash (fast, but loud: every guard nearby turns and comes to look)
-- **E** — hack a camera in reach (disables it, costs +6 alarm)
-- **M** — toggle the music
-- **ENTER** — start · **R** — retry after being caught or winning
+| Key | Action |
+| --- | --- |
+| WASD / arrows | Move |
+| SHIFT | Run (loud — guards hear you) |
+| C | Sneak (slow, quiet, harder to spot) |
+| E | Hold near a camera to hack it · press near a closet to hide |
+| Click | Walk to that spot |
+| ESC / P | Pause · M mute |
 
-Tip: read a guard's cone before you move, and cross open floor only when it
-sweeps away. Dark **SHADOW** patches are your friends — stand in one and the
-alarm falls twice as fast while guards spot you from half as far.
+## Structure
 
-## The rooms
+- `game/index.html` — page, HUD and screens
+- `game/style.css` — HUD and overlay styling
+- `game/js/main.js` — game state, input, loop, screens
+- `game/js/levels.js` — the four level maps, palettes, loot values
+- `game/js/entities.js` — guards, cameras, loot, particles, line of sight
+- `game/js/render.js` — canvas drawing, cones, lighting, particles
+- `game/js/audio.js` — synthesized WebAudio SFX and music
 
-Guards patrol with vision cones. A guard who spots you grows suspicious, then
-gives chase — if one grabs you, the run ends. Cameras sweep their own cones and
-raise the alarm while they see you; hack them from close range. Hide in the
-dark **SHADOW** patches and the alarm falls fast. Grab all the loot in a room
-to unlock its exit. Your best getaway time is kept in `localStorage`.
+## Verified
 
-## Files
+Playwright + headed Firefox probe, 25/25 checks pass: boot, movement, sneak,
+guard and camera detection raising the alarm, hiding decaying the alarm, loot
+pickup, camera hack, exit win, caught screen, retry, full 4-level playthrough
+to the win screen, best time saved to localStorage, zero page/console errors.
+Four real-render screenshots under `screenshots/` (1280×800, each ≤ 84 KiB);
+the cover shows room, guard cone, camera, loot and alarm meter in one frame.
 
-- `game/index.html` — the page
-- `game/js/main.js` — game loop, input, alarm and win/caught rules
-- `game/js/levels.js` — the three rooms
-- `game/js/entities.js` — guards, cameras, line of sight and movement
-- `game/js/render.js` — everything drawn on screen
-- `game/js/audio.js` — WebAudio sound effects and music
-- `main.ts` — hands the game in with `buildDossier`
-- `screenshots/` — renders of the game running in a browser
+## Run it
 
-All names, art, sounds and music are original, made for this entry.
+Serve `game/` over any static HTTP server and open `index.html`:
+
+```sh
+cd game && python3 -m http.server 8123
+```
+
+`main.ts` hands the game in: it copies `game/` and `screenshots/` into
+`MAKEFUN_OUTPUT_DIR` (or `/output`) and writes `dossier.json` there.

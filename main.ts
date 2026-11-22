@@ -1,8 +1,10 @@
-// Gilded Heist — entrypoint: hand the game in.
+// VELVET SHADOW — entrypoint: hand the game in.
 // Copies game/ and screenshots/ from this repository into the output directory
 // and writes the dossier there with buildDossier from vendor/makefun-game.ts.
 // The output directory is MAKEFUN_OUTPUT_DIR, falling back to /output.
 // The entry directory is located from import.meta.url, never from the cwd.
+// (No rmSync here: the grader runs as uid 65534 on a read-only repo, and
+// deleting the output directory itself is EACCES.)
 
 import { cpSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
